@@ -24,7 +24,7 @@ func TestHash(t *testing.T) {
 	hashes := make(map[string]struct{})
 
 	for _, str := range strs {
-		h := hash(str)
+		h := hashRaw(str)
 		assert.Equal(t, len(h), 10)
 		_, ok := hashes[h]
 		assert.False(t, ok)

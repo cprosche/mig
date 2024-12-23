@@ -16,7 +16,12 @@ import (
 // TODO: mysql
 // TODO: mssql
 
-// Config is the configuration for the mig package
+const (
+	DEFAULT_UP_DELIMITER   = "-- up"
+	DEFAULT_DOWN_DELIMITER = "-- down"
+)
+
+// Config is the configuration for Mig
 type Config struct {
 	// Db is the database connection used for migrations
 	Db *sql.DB
@@ -26,6 +31,10 @@ type Config struct {
 
 	// If Fs is nil, then this slice of migrations will be used
 	Migrations []Migration
+
+	// Delimiters for splitting up and down migrations in a single file
+	UpDelimiter   string
+	DownDelimiter string
 }
 
 // Mig is the main struct for the mig package
@@ -48,17 +57,26 @@ type Migration struct {
 	Id       int
 	FileName string
 
-	Raw  string
-	Hash string
+	raw  string
+	hash string
 
 	Up   string
 	Down string
 }
 
 func New(c Config) *Mig {
-	return &Mig{
+	if c.UpDelimiter == "" {
+		c.UpDelimiter = DEFAULT_UP_DELIMITER
+	}
+	if c.DownDelimiter == "" {
+		c.DownDelimiter = DEFAULT_DOWN_DELIMITER
+	}
+
+	m := &Mig{
 		config: c,
 	}
+
+	return m
 }
 
 func (m *Mig) Migrate() error {
@@ -71,12 +89,14 @@ func (m *Mig) Migrate() error {
 	var providedMigrations []Migration
 	var err error
 	if m.config.Fs != nil {
-		providedMigrations, err = getMigrationsFromFS(m.config.Fs)
+		providedMigrations, err = m.getMigrationsFromFS()
 		if err != nil {
 			return fmt.Errorf("mig: error getting migrations from fs: %w", err)
 		}
 	} else {
 		providedMigrations = m.config.Migrations
+		m.assignRaw(providedMigrations)
+		assignHashes(providedMigrations)
 	}
 	if len(providedMigrations) == 0 {
 		return fmt.Errorf("mig: no migrations provided")
@@ -90,6 +110,8 @@ func (m *Mig) Migrate() error {
 	upStart := 1
 	downEnd := math.MaxInt
 	for _, pm := range providedMigrations {
+		// TODO: what about missing migrations?
+
 		// get matching db migration
 		dbm := Migration{}
 		for _, m := range dbMigrations {
@@ -98,6 +120,7 @@ func (m *Mig) Migrate() error {
 				break
 			}
 		}
+
 		upStart = pm.Id
 
 		// if no matching db migration, then migrate starting from here
@@ -106,9 +129,8 @@ func (m *Mig) Migrate() error {
 		}
 
 		// if hash doesn't match, then migrate down to here
-		if dbm.Hash != pm.Hash {
+		if dbm.hash != pm.hash {
 			downEnd = dbm.Id
-			fmt.Printf("mig: found hash mismatch at id %d, running down migrations", dbm.Id)
 			break
 		}
 	}
@@ -119,6 +141,11 @@ func (m *Mig) Migrate() error {
 			return fmt.Errorf("mig: error running down migrations: %w", err)
 		}
 
+		err = runUpMigrations(m.config.Db, providedMigrations, downEnd)
+		if err != nil {
+			return fmt.Errorf("mig: error running up migrations: %w", err)
+		}
+	} else {
 		err = runUpMigrations(m.config.Db, providedMigrations, upStart)
 		if err != nil {
 			return fmt.Errorf("mig: error running up migrations: %w", err)
@@ -152,8 +179,8 @@ func runUpMigrations(db *sql.DB, migrations []Migration, startId int) error {
 		`,
 			m.Id,
 			m.FileName,
-			m.Raw,
-			m.Hash,
+			m.raw,
+			m.hash,
 			m.Up,
 			m.Down,
 		)
@@ -197,7 +224,7 @@ func runDownMigrations(db *sql.DB, migrations []Migration, endId int) error {
 	return nil
 }
 
-func hash(s string) string {
+func hashRaw(s string) string {
 	h := fnv.New32a()
 	h.Write([]byte(s))
 
@@ -211,10 +238,22 @@ func hash(s string) string {
 	return result
 }
 
-func getMigrationsFromFS(fsys fs.FS) ([]Migration, error) {
+func assignHashes(migrations []Migration) {
+	for i := range migrations {
+		migrations[i].hash = hashRaw(migrations[i].raw)
+	}
+}
+
+func (mig *Mig) assignRaw(migrations []Migration) {
+	for i := range migrations {
+		migrations[i].raw = getRaw(migrations[i].Up, migrations[i].Down, mig.config.UpDelimiter, mig.config.DownDelimiter)
+	}
+}
+
+func (mig *Mig) getMigrationsFromFS() ([]Migration, error) {
 	result := []Migration{}
 
-	entries, err := fs.ReadDir(fsys, ".")
+	entries, err := fs.ReadDir(mig.config.Fs, ".")
 	if err != nil {
 		return nil, err
 	}
@@ -231,12 +270,17 @@ func getMigrationsFromFS(fsys fs.FS) ([]Migration, error) {
 			return nil, err
 		}
 
-		contents, err := fs.ReadFile(fsys, entry.Name())
+		contents, err := fs.ReadFile(mig.config.Fs, entry.Name())
 		if err != nil {
 			return nil, err
 		}
-		m.Raw = string(contents)
-		m.Hash = hash(m.Raw)
+		m.raw = string(contents)
+		m.hash = hashRaw(m.raw)
+
+		m.Up, m.Down, err = splitRaw(m.raw, mig.config.UpDelimiter, mig.config.DownDelimiter)
+		if err != nil {
+			return nil, err
+		}
 
 		result = append(result, m)
 	}
@@ -246,6 +290,44 @@ func getMigrationsFromFS(fsys fs.FS) ([]Migration, error) {
 		return result[i].Id < result[j].Id
 	})
 	return result, nil
+}
+
+func splitRaw(raw, upDelimiter, downDelimiter string) (up string, down string, err error) {
+	upStartIndex, err := findDelimiterIndex(raw, upDelimiter)
+	if err != nil {
+		return "", "", err
+	}
+
+	downStartIndex, err := findDelimiterIndex(raw, downDelimiter)
+	if err != nil {
+		return "", "", err
+	}
+
+	if upStartIndex < downStartIndex {
+		return raw[:downStartIndex], raw[downStartIndex:], nil
+	} else {
+		return raw[upStartIndex:], raw[:upStartIndex], nil
+	}
+}
+
+func getRaw(up, down, upDelimiter, downDelimiter string) string {
+	return upDelimiter + "\n" + up + "\n" + downDelimiter + "\n" + down
+}
+
+func findDelimiterIndex(raw, delimiter string) (int, error) {
+	index := 0
+	for i := 0; i < len(raw); i++ {
+		if raw[i] == delimiter[index] {
+			index++
+			if index == len(delimiter) {
+				return i + 1, nil
+			}
+		} else {
+			index = 0
+		}
+	}
+
+	return 0, fmt.Errorf("mig: delimiter not found")
 }
 
 func getMigrationsFromDB(db *sql.DB) ([]Migration, error) {
@@ -258,7 +340,7 @@ func getMigrationsFromDB(db *sql.DB) ([]Migration, error) {
 	result := []Migration{}
 	for rows.Next() {
 		m := Migration{}
-		err = rows.Scan(&m.Id, &m.FileName, &m.Raw, &m.Hash, &m.Up, &m.Down)
+		err = rows.Scan(&m.Id, &m.FileName, &m.raw, &m.hash, &m.Up, &m.Down)
 		if err != nil {
 			return nil, err
 		}
