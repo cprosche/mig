@@ -7,8 +7,7 @@ import (
 )
 
 func TestUninitialized(t *testing.T) {
-	mig := New(Config{})
-	err := mig.Migrate()
+	_, err := New(Config{})
 	assert.NotNil(t, err)
 }
 

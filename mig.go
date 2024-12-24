@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"io/fs"
-	"math"
 	"sort"
 )
 
@@ -56,7 +55,7 @@ type Migration struct {
 	Down string
 }
 
-func New(c Config) *Mig {
+func New(c Config) (*Mig, error) {
 	if c.UpDelimiter == "" {
 		c.UpDelimiter = DEFAULT_UP_DELIMITER
 	}
@@ -68,165 +67,152 @@ func New(c Config) *Mig {
 		config: c,
 	}
 
-	return m
-}
-
-func (m *Mig) Migrate() error {
 	if m.config.Db == nil {
-		return fmt.Errorf("db is nil")
+		return &Mig{}, fmt.Errorf("db is nil")
 	}
 
+	// Create migrations table if it doesn't exist
 	m.config.Db.Exec(migrationTableSchema)
 
-	var providedMigrations []Migration
+	// Get migrations from filesystem or from the provided slice
 	var err error
 	if m.config.Fs != nil {
-		providedMigrations, err = m.getMigrationsFromFS()
+		m.config.Migrations, err = m.getMigrationsFromFS()
 		if err != nil {
-			return fmt.Errorf("mig: error getting migrations from fs: %w", err)
+			return &Mig{}, fmt.Errorf("mig: error getting migrations from fs: %w", err)
 		}
-	} else {
-		providedMigrations = m.config.Migrations
-		m.assignRaw(providedMigrations)
-		assignHashes(providedMigrations)
 	}
-	if len(providedMigrations) == 0 {
-		return fmt.Errorf("mig: no migrations provided")
-	}
+	sort.Slice(m.config.Migrations, func(i, j int) bool {
+		return m.config.Migrations[i].Id < m.config.Migrations[j].Id
+	})
 
-	dbMigrations, err := m.getMigrationsFromDB()
+	m.assignRawAndHashes()
+	return m, nil
+}
+
+func (mig *Mig) Migrate() error {
+	err := mig.runDown()
 	if err != nil {
-		return fmt.Errorf("mig: error getting migrations from db: %w", err)
+		return err
 	}
 
-	upStart := 1
-	downEnd := math.MaxInt
-	for _, pm := range providedMigrations {
-		// TODO: what about missing migrations?
-		// thoughts: if a migration is missing, then we should stop and return an error
-
-		// get matching db migration
-		dbm := Migration{}
-		for _, m := range dbMigrations {
-			if pm.Id == m.Id {
-				dbm = m
-				break
-			}
-		}
-
-		upStart = pm.Id
-
-		// if no matching db migration, then migrate starting from here
-		if dbm.Id == 0 {
-			break
-		}
-
-		// if hash doesn't match, then migrate down to here
-		if dbm.hash != pm.hash {
-			downEnd = dbm.Id
-			break
-		}
+	err = mig.runUp()
+	if err != nil {
+		return err
 	}
 
-	if downEnd < math.MaxInt {
-		err = runDownMigrations(m.config.Db, dbMigrations, downEnd)
-		if err != nil {
-			return fmt.Errorf("mig: error running down migrations: %w", err)
-		}
-
-		err = runUpMigrations(m.config.Db, providedMigrations, downEnd)
-		if err != nil {
-			return fmt.Errorf("mig: error running up migrations: %w", err)
-		}
-	} else {
-		err = runUpMigrations(m.config.Db, providedMigrations, upStart)
-		if err != nil {
-			return fmt.Errorf("mig: error running up migrations: %w", err)
-		}
-	}
-
-	fmt.Println(providedMigrations)
 	return nil
 }
 
-func runUpMigrations(db *sql.DB, migrations []Migration, startId int) error {
-	sort.Slice(migrations, func(i, j int) bool {
-		return migrations[i].Id < migrations[j].Id
-	})
-	for _, m := range migrations {
-		if m.Id < startId {
+func (mig *Mig) assignRawAndHashes() {
+	for i := range mig.config.Migrations {
+		if mig.config.Migrations[i].raw == "" {
+			mig.config.Migrations[i].raw = getRaw(
+				mig.config.Migrations[i].Up,
+				mig.config.Migrations[i].Down,
+				mig.config.UpDelimiter,
+				mig.config.DownDelimiter,
+			)
+		}
+		if mig.config.Migrations[i].hash == "" {
+			mig.config.Migrations[i].hash = hashRaw(mig.config.Migrations[i].raw)
+		}
+	}
+}
+
+func (mig *Mig) runUp() error {
+	dbMigrations, err := mig.getMigrationsFromDB()
+	if err != nil {
+		return err
+	}
+	lastId := 0
+	if len(dbMigrations) > 1 {
+		lastId = dbMigrations[len(dbMigrations)-1].Id
+	}
+
+	for _, m := range mig.config.Migrations {
+		if m.Id <= lastId {
 			continue
 		}
 
-		_, err := db.Exec(m.Up)
+		_, err := mig.config.Db.Exec(m.Up)
 		if err != nil {
-			return fmt.Errorf("mig: error running up migration %d: %w", m.Id, err)
+			return err
 		}
 
-		_, err = db.Exec(
-			`
-		INSERT INTO 
-			migrations (id, filename, raw, hash, up, down) 
-		VALUES 
-			(?, ?, ?, ?, ?, ?)
-		`,
-			m.Id,
-			m.FileName,
-			m.raw,
-			m.hash,
-			m.Up,
-			m.Down,
-		)
-
+		_, err = mig.config.Db.Exec("INSERT INTO migrations (id, filename, raw, hash, up, down) VALUES (?, ?, ?, ?, ?, ?)",
+			m.Id, m.FileName, m.raw, m.hash, m.Up, m.Down)
 		if err != nil {
-			return fmt.Errorf("mig: error inserting migration %d into db: %w", m.Id, err)
+			return err
 		}
-
-		fmt.Printf("mig: ran up migration %d\n", m.Id)
 	}
 
 	return nil
 }
 
-func runDownMigrations(db *sql.DB, migrations []Migration, endId int) error {
-	sort.Slice(migrations, func(i, j int) bool {
-		return migrations[i].Id < migrations[j].Id
-	})
-	for i := len(migrations) - 1; i >= 0; i-- {
-		m := migrations[i]
+// runDown finds if there are down migrations that need to be run and runs all migrations down to them
+func (mig *Mig) runDown() error {
+	dbMigrations, err := mig.getMigrationsFromDB()
+	if err != nil {
+		return err
+	}
 
-		// if we reach the end id, then we're done, but make sure we run end id migration
-		if m.Id < endId {
+	// find any hash mismatches, and run down to the first one
+	mismatchId := 0
+	for i, dbMig := range dbMigrations {
+		if i >= len(mig.config.Migrations) {
+			continue
+		}
+		if dbMig.Id != mig.config.Migrations[i].Id {
+			return fmt.Errorf("mismatched migration id: dbMig.Id=%d, mig.config.Migrations[i].Id=%d", dbMig.Id, mig.config.Migrations[i].Id)
+		}
+		if dbMig.hash != mig.config.Migrations[i].hash {
+			mismatchId = dbMig.Id
+			break
+		}
+	}
+	if mismatchId != 0 {
+		return mig.RunDownTo(mismatchId)
+	}
+
+	// if there are more migrations in the db than in the slice, run down to the end of the slice
+	if len(dbMigrations) > len(mig.config.Migrations) {
+		lastId := mig.config.Migrations[len(mig.config.Migrations)-1].Id + 1
+		return mig.RunDownTo(lastId)
+	}
+
+	return nil
+}
+
+func (mig *Mig) RunDownTo(endId int) error {
+	dbMigrations, err := mig.getMigrationsFromDB()
+	if err != nil {
+		return fmt.Errorf("error getting migrations from db: %w", err)
+	}
+
+	for i := len(dbMigrations) - 1; i >= 0; i-- {
+		if dbMigrations[i].Id < endId {
 			break
 		}
 
-		_, err := db.Exec(m.Down)
+		// run down migration
+		_, err := mig.config.Db.Exec(dbMigrations[i].Down)
 		if err != nil {
-			return fmt.Errorf("mig: error running down migration %d: %w", m.Id, err)
+			return fmt.Errorf("error running down migration: %w", err)
 		}
 
-		_, err = db.Exec(`DELETE FROM migrations WHERE id = ?`, m.Id)
+		// remove migration from migrations table
+		_, err = mig.config.Db.Exec("DELETE FROM migrations WHERE id = ?", dbMigrations[i].Id)
 		if err != nil {
-			return fmt.Errorf("mig: error deleting migration %d from db: %w", m.Id, err)
+			return fmt.Errorf("error deleting migration from migrations table: %w", err)
 		}
-
-		fmt.Printf("mig: ran down migration %d\n", m.Id)
-
 	}
 
 	return nil
 }
 
-func assignHashes(migrations []Migration) {
-	for i := range migrations {
-		migrations[i].hash = hashRaw(migrations[i].raw)
-	}
-}
-
-func (mig *Mig) assignRaw(migrations []Migration) {
-	for i := range migrations {
-		migrations[i].raw = getRaw(migrations[i].Up, migrations[i].Down, mig.config.UpDelimiter, mig.config.DownDelimiter)
-	}
+func (mig *Mig) RunUp(expectedMigrations []Migration) error {
+	return nil
 }
 
 func (mig *Mig) getMigrationsFromFS() ([]Migration, error) {
@@ -264,7 +250,6 @@ func (mig *Mig) getMigrationsFromFS() ([]Migration, error) {
 		result = append(result, m)
 	}
 
-	// sort by id
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Id < result[j].Id
 	})
@@ -288,7 +273,6 @@ func (mig *Mig) getMigrationsFromDB() ([]Migration, error) {
 		result = append(result, m)
 	}
 
-	// sort by id
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Id < result[j].Id
 	})
