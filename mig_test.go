@@ -6,6 +6,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TODO: test getIntFromFilename
+// TODO: test getMigrationsFromFS
+// TODO: test getMigrationsFromDB
+// TODO: test getDelimiterIndex
+// TODO: test assignRaw
+// TODO: test assignHashes
+// TODO: test runUpMigrations
+// TODO: test runDownMigrations
+// TODO: test splitRaw & getRaw
+
 func TestUninitialized(t *testing.T) {
 	mig := New(Config{})
 	err := mig.Migrate()
