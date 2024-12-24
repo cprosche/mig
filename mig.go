@@ -3,18 +3,10 @@ package mig
 import (
 	"database/sql"
 	"fmt"
-	"hash/fnv"
 	"io/fs"
 	"math"
 	"sort"
-	"strconv"
-	"unicode"
 )
-
-// TODO: sqlite
-// TODO: postgres
-// TODO: mysql
-// TODO: mssql
 
 const (
 	DEFAULT_UP_DELIMITER   = "-- up"
@@ -102,7 +94,7 @@ func (m *Mig) Migrate() error {
 		return fmt.Errorf("mig: no migrations provided")
 	}
 
-	dbMigrations, err := getMigrationsFromDB(m.config.Db)
+	dbMigrations, err := m.getMigrationsFromDB()
 	if err != nil {
 		return fmt.Errorf("mig: error getting migrations from db: %w", err)
 	}
@@ -111,6 +103,7 @@ func (m *Mig) Migrate() error {
 	downEnd := math.MaxInt
 	for _, pm := range providedMigrations {
 		// TODO: what about missing migrations?
+		// thoughts: if a migration is missing, then we should stop and return an error
 
 		// get matching db migration
 		dbm := Migration{}
@@ -224,20 +217,6 @@ func runDownMigrations(db *sql.DB, migrations []Migration, endId int) error {
 	return nil
 }
 
-func hashRaw(s string) string {
-	h := fnv.New32a()
-	h.Write([]byte(s))
-
-	result := fmt.Sprint(h.Sum32())
-
-	// pad result with 0s to 10 characters
-	for len(result) < 10 {
-		result = "0" + result
-	}
-
-	return result
-}
-
 func assignHashes(migrations []Migration) {
 	for i := range migrations {
 		migrations[i].hash = hashRaw(migrations[i].raw)
@@ -292,46 +271,8 @@ func (mig *Mig) getMigrationsFromFS() ([]Migration, error) {
 	return result, nil
 }
 
-func splitRaw(raw, upDelimiter, downDelimiter string) (up string, down string, err error) {
-	upStartIndex, err := findDelimiterIndex(raw, upDelimiter)
-	if err != nil {
-		return "", "", err
-	}
-
-	downStartIndex, err := findDelimiterIndex(raw, downDelimiter)
-	if err != nil {
-		return "", "", err
-	}
-
-	if upStartIndex < downStartIndex {
-		return raw[:downStartIndex], raw[downStartIndex:], nil
-	} else {
-		return raw[upStartIndex:], raw[:upStartIndex], nil
-	}
-}
-
-func getRaw(up, down, upDelimiter, downDelimiter string) string {
-	return upDelimiter + "\n" + up + "\n" + downDelimiter + "\n" + down
-}
-
-func findDelimiterIndex(raw, delimiter string) (int, error) {
-	index := 0
-	for i := 0; i < len(raw); i++ {
-		if raw[i] == delimiter[index] {
-			index++
-			if index == len(delimiter) {
-				return i + 1, nil
-			}
-		} else {
-			index = 0
-		}
-	}
-
-	return 0, fmt.Errorf("mig: delimiter not found")
-}
-
-func getMigrationsFromDB(db *sql.DB) ([]Migration, error) {
-	rows, err := db.Query("SELECT * FROM migrations")
+func (mig *Mig) getMigrationsFromDB() ([]Migration, error) {
+	rows, err := mig.config.Db.Query("SELECT * FROM migrations")
 	if err != nil {
 		return nil, err
 	}
@@ -351,34 +292,5 @@ func getMigrationsFromDB(db *sql.DB) ([]Migration, error) {
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Id < result[j].Id
 	})
-	return result, nil
-}
-
-// Expected filename format: 0001_create_users_table.sql.
-// This filename would return 1.
-// Starting number can be any length.
-func getIntFromFileName(fileName string) (int, error) {
-	numStr := ""
-
-	for _, r := range fileName {
-		if !unicode.IsDigit(r) {
-			break
-		}
-
-		numStr += string(r)
-	}
-
-	if numStr == "" {
-		return 0, fmt.Errorf("mig: no number found in filename")
-	}
-
-	result, err := strconv.Atoi(numStr)
-	if err != nil {
-		return 0, fmt.Errorf("mig: error converting number in filename to int: %w", err)
-	}
-	if result < 1 {
-		return 0, fmt.Errorf("mig: number in filename must be greater than 0")
-	}
-
 	return result, nil
 }
