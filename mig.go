@@ -35,7 +35,7 @@ type Mig struct {
 
 var migrationTableSchema = `
 		CREATE TABLE IF NOT EXISTS migrations (
-			id INTEGER PRIMARY KEY,
+			id SERIAL PRIMARY KEY,
 			filename TEXT,
 			raw TEXT,
 			hash TEXT,
@@ -72,10 +72,12 @@ func New(c Config) (*Mig, error) {
 	}
 
 	// Create migrations table if it doesn't exist
-	m.config.Db.Exec(migrationTableSchema)
+	_, err := m.config.Db.Exec(migrationTableSchema)
+	if err != nil {
+		return &Mig{}, fmt.Errorf("mig: error creating migrations table: %w", err)
+	}
 
 	// Get migrations from filesystem or from the provided slice
-	var err error
 	if m.config.Fs != nil {
 		m.config.Migrations, err = m.getMigrationsFromFS()
 		if err != nil {
@@ -137,7 +139,11 @@ func (mig *Mig) runUp() error {
 			return err
 		}
 
-		_, err = mig.config.Db.Exec("INSERT INTO migrations (id, filename, raw, hash, up, down) VALUES (?, ?, ?, ?, ?, ?)",
+		_, err = mig.config.Db.Exec(`
+		INSERT INTO 
+			migrations (id, filename, raw, hash, up, down) 
+		VALUES 
+			($1, $2, $3, $4, $5, $6)`,
 			m.Id, m.FileName, m.raw, m.hash, m.Up, m.Down)
 		if err != nil {
 			return err
@@ -194,7 +200,7 @@ func (mig *Mig) runDownTo(endId int) error {
 		}
 
 		// remove migration from migrations table
-		_, err = mig.config.Db.Exec("DELETE FROM migrations WHERE id = ?", dbMigrations[i].Id)
+		_, err = mig.config.Db.Exec("DELETE FROM migrations WHERE id = $1", dbMigrations[i].Id)
 		if err != nil {
 			return fmt.Errorf("error deleting migration from migrations table: %w", err)
 		}
