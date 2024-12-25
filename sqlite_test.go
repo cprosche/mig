@@ -38,10 +38,10 @@ func TestMigrate(t *testing.T) {
 		err = m.Migrate()
 		assert.Nil(t, err)
 
-		tableMustExist(t, db, "migrations")
-		tableMustExist(t, db, "test1")
-		tableMustExist(t, db, "test2")
-		tableMustNotExist(t, db, "test3")
+		tableMustExistSqlite(t, db, "migrations")
+		tableMustExistSqlite(t, db, "test1")
+		tableMustExistSqlite(t, db, "test2")
+		tableMustNotExistSqlite(t, db, "test3")
 
 		os.Remove(testDbPath)
 	})
@@ -74,16 +74,16 @@ func TestMigrate(t *testing.T) {
 		err = m.Migrate()
 		assert.Nil(t, err)
 
-		tableMustExist(t, db, "migrations")
-		tableMustExist(t, db, "test1")
-		tableMustExist(t, db, "test2")
+		tableMustExistSqlite(t, db, "migrations")
+		tableMustExistSqlite(t, db, "test1")
+		tableMustExistSqlite(t, db, "test2")
 
 		err = m.Migrate()
 		assert.Nil(t, err)
 
-		tableMustExist(t, db, "migrations")
-		tableMustExist(t, db, "test1")
-		tableMustExist(t, db, "test2")
+		tableMustExistSqlite(t, db, "migrations")
+		tableMustExistSqlite(t, db, "test1")
+		tableMustExistSqlite(t, db, "test2")
 
 		os.Remove(testDbPath)
 	})
@@ -116,10 +116,10 @@ func TestMigrate(t *testing.T) {
 		err = m.Migrate()
 		assert.Nil(t, err)
 
-		tableMustExist(t, db, "migrations")
-		tableMustExist(t, db, "test1")
-		tableMustExist(t, db, "test2")
-		tableMustNotExist(t, db, "test3")
+		tableMustExistSqlite(t, db, "migrations")
+		tableMustExistSqlite(t, db, "test1")
+		tableMustExistSqlite(t, db, "test2")
+		tableMustNotExistSqlite(t, db, "test3")
 
 		m.config.Migrations = append(m.config.Migrations, Migration{
 			Id:   3,
@@ -130,10 +130,10 @@ func TestMigrate(t *testing.T) {
 		err = m.Migrate()
 		assert.Nil(t, err)
 
-		tableMustExist(t, db, "migrations")
-		tableMustExist(t, db, "test1")
-		tableMustExist(t, db, "test2")
-		tableMustExist(t, db, "test3")
+		tableMustExistSqlite(t, db, "migrations")
+		tableMustExistSqlite(t, db, "test1")
+		tableMustExistSqlite(t, db, "test2")
+		tableMustExistSqlite(t, db, "test3")
 
 		os.Remove(testDbPath)
 	})
@@ -171,20 +171,20 @@ func TestMigrate(t *testing.T) {
 		err = m.Migrate()
 		assert.Nil(t, err)
 
-		tableMustExist(t, db, "migrations")
-		tableMustExist(t, db, "test1")
-		tableMustExist(t, db, "test2")
-		tableMustExist(t, db, "test3")
+		tableMustExistSqlite(t, db, "migrations")
+		tableMustExistSqlite(t, db, "test1")
+		tableMustExistSqlite(t, db, "test2")
+		tableMustExistSqlite(t, db, "test3")
 
 		m.config.Migrations = m.config.Migrations[:2]
 
 		err = m.Migrate()
 		assert.Nil(t, err)
 
-		tableMustExist(t, db, "migrations")
-		tableMustExist(t, db, "test1")
-		tableMustExist(t, db, "test2")
-		tableMustNotExist(t, db, "test3")
+		tableMustExistSqlite(t, db, "migrations")
+		tableMustExistSqlite(t, db, "test1")
+		tableMustExistSqlite(t, db, "test2")
+		tableMustNotExistSqlite(t, db, "test3")
 
 		os.Remove(testDbPath)
 	})
@@ -222,11 +222,11 @@ func TestMigrate(t *testing.T) {
 		err = m.Migrate()
 		assert.Nil(t, err)
 
-		tableMustExist(t, db, "migrations")
-		tableMustExist(t, db, "test1")
-		tableMustExist(t, db, "test2")
-		tableMustExist(t, db, "test3")
-		tableMustNotExist(t, db, "test4")
+		tableMustExistSqlite(t, db, "migrations")
+		tableMustExistSqlite(t, db, "test1")
+		tableMustExistSqlite(t, db, "test2")
+		tableMustExistSqlite(t, db, "test3")
+		tableMustNotExistSqlite(t, db, "test4")
 
 		m.config.Migrations[1].Up = "CREATE TABLE test4 (id INTEGER PRIMARY KEY, name TEXT, age INTEGER);"
 		m.config.Migrations[1].Down = "DROP TABLE test4;"
@@ -234,11 +234,11 @@ func TestMigrate(t *testing.T) {
 		err = m.Migrate()
 		assert.Nil(t, err)
 
-		tableMustExist(t, db, "migrations")
-		tableMustExist(t, db, "test1")
-		tableMustNotExist(t, db, "test2")
-		tableMustExist(t, db, "test3")
-		tableMustExist(t, db, "test4")
+		tableMustExistSqlite(t, db, "migrations")
+		tableMustExistSqlite(t, db, "test1")
+		tableMustNotExistSqlite(t, db, "test2")
+		tableMustExistSqlite(t, db, "test3")
+		tableMustExistSqlite(t, db, "test4")
 
 		m.config.Migrations[0].Up = "CREATE TABLE test5 (id INTEGER PRIMARY KEY, name TEXT);"
 		m.config.Migrations[0].Down = "DROP TABLE test5;"
@@ -246,12 +246,12 @@ func TestMigrate(t *testing.T) {
 		err = m.Migrate()
 		assert.Nil(t, err)
 
-		tableMustExist(t, db, "migrations")
-		tableMustNotExist(t, db, "test1")
-		tableMustNotExist(t, db, "test2")
-		tableMustExist(t, db, "test3")
-		tableMustExist(t, db, "test4")
-		tableMustExist(t, db, "test5")
+		tableMustExistSqlite(t, db, "migrations")
+		tableMustNotExistSqlite(t, db, "test1")
+		tableMustNotExistSqlite(t, db, "test2")
+		tableMustExistSqlite(t, db, "test3")
+		tableMustExistSqlite(t, db, "test4")
+		tableMustExistSqlite(t, db, "test5")
 
 		os.Remove(testDbPath)
 	})
@@ -271,37 +271,37 @@ func TestMigrate(t *testing.T) {
 		err = m.Migrate()
 		assert.Nil(t, err)
 
-		tableMustExist(t, db, "migrations")
-		tableMustExist(t, db, "test_table_1")
-		tableMustExist(t, db, "test_table_2")
-		tableMustExist(t, db, "test_table_3")
-		tableMustNotExist(t, db, "test_table_4")
+		tableMustExistSqlite(t, db, "migrations")
+		tableMustExistSqlite(t, db, "test_table_1")
+		tableMustExistSqlite(t, db, "test_table_2")
+		tableMustExistSqlite(t, db, "test_table_3")
+		tableMustNotExistSqlite(t, db, "test_table_4")
 
 		m.config.Migrations[2].Up = "CREATE TABLE test_table_5 (id INTEGER PRIMARY KEY, name TEXT);"
 		m.config.Migrations[2].Down = "DROP TABLE test_table_5;"
 		err = m.Migrate()
 		assert.Nil(t, err)
 
-		tableMustExist(t, db, "migrations")
-		tableMustExist(t, db, "test_table_1")
-		tableMustExist(t, db, "test_table_2")
-		tableMustNotExist(t, db, "test_table_3")
-		tableMustNotExist(t, db, "test_table_4")
-		tableMustExist(t, db, "test_table_5")
+		tableMustExistSqlite(t, db, "migrations")
+		tableMustExistSqlite(t, db, "test_table_1")
+		tableMustExistSqlite(t, db, "test_table_2")
+		tableMustNotExistSqlite(t, db, "test_table_3")
+		tableMustNotExistSqlite(t, db, "test_table_4")
+		tableMustExistSqlite(t, db, "test_table_5")
 
 		os.Remove(testDbPath)
 	})
 }
 
-func tableMustExist(t *testing.T, db *sql.DB, tableName string) {
-	rows, err := db.Query("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", tableName)
+func tableMustExistSqlite(t *testing.T, db *sql.DB, tableName string) {
+	rows, err := db.Query("SELECT name FROM sqlite_master WHERE type='table' AND name=$1;", tableName)
 	assert.Nil(t, err)
 	defer rows.Close()
 	assert.True(t, rows.Next(), "table %s must exist", tableName)
 }
 
-func tableMustNotExist(t *testing.T, db *sql.DB, tableName string) {
-	rows, err := db.Query("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", tableName)
+func tableMustNotExistSqlite(t *testing.T, db *sql.DB, tableName string) {
+	rows, err := db.Query("SELECT name FROM sqlite_master WHERE type='table' AND name=$1;", tableName)
 	assert.Nil(t, err)
 	defer rows.Close()
 	assert.False(t, rows.Next(), "table %s must not exist", tableName)
