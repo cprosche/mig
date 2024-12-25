@@ -255,6 +255,42 @@ func TestMigrate(t *testing.T) {
 
 		os.Remove(testDbPath)
 	})
+
+	t.Run("migrations from FS work", func(t *testing.T) {
+		testDbPath := "./test/test7.db"
+		db, err := sql.Open("sqlite3", testDbPath)
+		assert.Nil(t, err)
+		defer db.Close()
+
+		m, err := New(Config{
+			Db: db,
+			Fs: os.DirFS("./test/migrations1"),
+		})
+		assert.Nil(t, err)
+
+		err = m.Migrate()
+		assert.Nil(t, err)
+
+		tableMustExist(t, db, "migrations")
+		tableMustExist(t, db, "test_table_1")
+		tableMustExist(t, db, "test_table_2")
+		tableMustExist(t, db, "test_table_3")
+		tableMustNotExist(t, db, "test_table_4")
+
+		m.config.Migrations[2].Up = "CREATE TABLE test_table_5 (id INTEGER PRIMARY KEY, name TEXT);"
+		m.config.Migrations[2].Down = "DROP TABLE test_table_5;"
+		err = m.Migrate()
+		assert.Nil(t, err)
+
+		tableMustExist(t, db, "migrations")
+		tableMustExist(t, db, "test_table_1")
+		tableMustExist(t, db, "test_table_2")
+		tableMustNotExist(t, db, "test_table_3")
+		tableMustNotExist(t, db, "test_table_4")
+		tableMustExist(t, db, "test_table_5")
+
+		os.Remove(testDbPath)
+	})
 }
 
 func tableMustExist(t *testing.T, db *sql.DB, tableName string) {
