@@ -3,6 +3,8 @@
 
 # mig
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/cprosche/mig.svg)](https://pkg.go.dev/github.com/cprosche/mig)
+
 Database migration framework for Go
 
 ## Installation
