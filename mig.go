@@ -91,6 +91,7 @@ func New(c Config) (*Mig, error) {
 }
 
 func (mig *Mig) Migrate() error {
+	mig.assignRawAndHashes()
 	err := mig.runDown()
 	if err != nil {
 		return err
@@ -106,17 +107,13 @@ func (mig *Mig) Migrate() error {
 
 func (mig *Mig) assignRawAndHashes() {
 	for i := range mig.config.Migrations {
-		if mig.config.Migrations[i].raw == "" {
-			mig.config.Migrations[i].raw = getRaw(
-				mig.config.Migrations[i].Up,
-				mig.config.Migrations[i].Down,
-				mig.config.UpDelimiter,
-				mig.config.DownDelimiter,
-			)
-		}
-		if mig.config.Migrations[i].hash == "" {
-			mig.config.Migrations[i].hash = hashRaw(mig.config.Migrations[i].raw)
-		}
+		mig.config.Migrations[i].raw = getRaw(
+			mig.config.Migrations[i].Up,
+			mig.config.Migrations[i].Down,
+			mig.config.UpDelimiter,
+			mig.config.DownDelimiter,
+		)
+		mig.config.Migrations[i].hash = hashRaw(mig.config.Migrations[i].raw)
 	}
 }
 
@@ -126,7 +123,7 @@ func (mig *Mig) runUp() error {
 		return err
 	}
 	lastId := 0
-	if len(dbMigrations) > 1 {
+	if len(dbMigrations) > 0 {
 		lastId = dbMigrations[len(dbMigrations)-1].Id
 	}
 
@@ -158,7 +155,6 @@ func (mig *Mig) runDown() error {
 	}
 
 	// find any hash mismatches, and run down to the first one
-	mismatchId := 0
 	for i, dbMig := range dbMigrations {
 		if i >= len(mig.config.Migrations) {
 			continue
@@ -167,24 +163,20 @@ func (mig *Mig) runDown() error {
 			return fmt.Errorf("mismatched migration id: dbMig.Id=%d, mig.config.Migrations[i].Id=%d", dbMig.Id, mig.config.Migrations[i].Id)
 		}
 		if dbMig.hash != mig.config.Migrations[i].hash {
-			mismatchId = dbMig.Id
-			break
+			return mig.runDownTo(dbMig.Id)
 		}
-	}
-	if mismatchId != 0 {
-		return mig.RunDownTo(mismatchId)
 	}
 
 	// if there are more migrations in the db than in the slice, run down to the end of the slice
 	if len(dbMigrations) > len(mig.config.Migrations) {
 		lastId := mig.config.Migrations[len(mig.config.Migrations)-1].Id + 1
-		return mig.RunDownTo(lastId)
+		return mig.runDownTo(lastId)
 	}
 
 	return nil
 }
 
-func (mig *Mig) RunDownTo(endId int) error {
+func (mig *Mig) runDownTo(endId int) error {
 	dbMigrations, err := mig.getMigrationsFromDB()
 	if err != nil {
 		return fmt.Errorf("error getting migrations from db: %w", err)
@@ -208,10 +200,6 @@ func (mig *Mig) RunDownTo(endId int) error {
 		}
 	}
 
-	return nil
-}
-
-func (mig *Mig) RunUp(expectedMigrations []Migration) error {
 	return nil
 }
 

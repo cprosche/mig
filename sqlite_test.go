@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TODO: add tests for sqlite
 func TestMigrate(t *testing.T) {
 	t.Run("fresh migrate runs successfully", func(t *testing.T) {
 		testDbPath := "./test/test2.db"
@@ -19,16 +18,14 @@ func TestMigrate(t *testing.T) {
 
 		migrations := []Migration{
 			{
-				Id:       1,
-				FileName: "01_test1.sql",
-				Up:       "CREATE TABLE test1 (id INTEGER PRIMARY KEY, name TEXT);",
-				Down:     "DROP TABLE test1;",
+				Id:   1,
+				Up:   "CREATE TABLE test1 (id INTEGER PRIMARY KEY, name TEXT);",
+				Down: "DROP TABLE test1;",
 			},
 			{
-				Id:       2,
-				FileName: "02_test2.sql",
-				Up:       "CREATE TABLE test2 (id INTEGER PRIMARY KEY, name TEXT);",
-				Down:     "DROP TABLE test2;",
+				Id:   2,
+				Up:   "CREATE TABLE test2 (id INTEGER PRIMARY KEY, name TEXT);",
+				Down: "DROP TABLE test2;",
 			},
 		}
 
@@ -57,16 +54,14 @@ func TestMigrate(t *testing.T) {
 
 		migrations := []Migration{
 			{
-				Id:       1,
-				FileName: "01_test1.sql",
-				Up:       "CREATE TABLE test1 (id INTEGER PRIMARY KEY, name TEXT);",
-				Down:     "DROP TABLE test1;",
+				Id:   1,
+				Up:   "CREATE TABLE test1 (id INTEGER PRIMARY KEY, name TEXT);",
+				Down: "DROP TABLE test1;",
 			},
 			{
-				Id:       2,
-				FileName: "02_test2.sql",
-				Up:       "CREATE TABLE test2 (id INTEGER PRIMARY KEY, name TEXT);",
-				Down:     "DROP TABLE test2;",
+				Id:   2,
+				Up:   "CREATE TABLE test2 (id INTEGER PRIMARY KEY, name TEXT);",
+				Down: "DROP TABLE test2;",
 			},
 		}
 
@@ -244,6 +239,19 @@ func TestMigrate(t *testing.T) {
 		tableMustNotExist(t, db, "test2")
 		tableMustExist(t, db, "test3")
 		tableMustExist(t, db, "test4")
+
+		m.config.Migrations[0].Up = "CREATE TABLE test5 (id INTEGER PRIMARY KEY, name TEXT);"
+		m.config.Migrations[0].Down = "DROP TABLE test5;"
+
+		err = m.Migrate()
+		assert.Nil(t, err)
+
+		tableMustExist(t, db, "migrations")
+		tableMustNotExist(t, db, "test1")
+		tableMustNotExist(t, db, "test2")
+		tableMustExist(t, db, "test3")
+		tableMustExist(t, db, "test4")
+		tableMustExist(t, db, "test5")
 
 		os.Remove(testDbPath)
 	})
