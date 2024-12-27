@@ -18,7 +18,8 @@ type Config struct {
 	Db *sql.DB
 
 	// Fs is the filesystem where the migrations are stored
-	Fs fs.FS
+	Fs              fs.FS
+	OverrideDirName string
 
 	// If Fs is nil, then this slice of migrations will be used
 	Migrations []Migration
@@ -139,12 +140,19 @@ func (mig *Mig) runUp() error {
 			return err
 		}
 
-		_, err = mig.config.Db.Exec(`
+		_, err = mig.config.Db.Exec(
+			`
 		INSERT INTO 
 			migrations (id, filename, raw, hash, up, down) 
 		VALUES 
 			($1, $2, $3, $4, $5, $6)`,
-			m.Id, m.FileName, m.raw, m.hash, m.Up, m.Down)
+			m.Id,
+			m.FileName,
+			m.raw,
+			m.hash,
+			m.Up,
+			m.Down,
+		)
 		if err != nil {
 			return err
 		}
@@ -166,7 +174,11 @@ func (mig *Mig) runDown() error {
 			continue
 		}
 		if dbMig.Id != mig.config.Migrations[i].Id {
-			return fmt.Errorf("mismatched migration id: dbMig.Id=%d, mig.config.Migrations[i].Id=%d", dbMig.Id, mig.config.Migrations[i].Id)
+			return fmt.Errorf(
+				"mismatched migration id: dbMig.Id=%d, mig.config.Migrations[i].Id=%d",
+				dbMig.Id,
+				mig.config.Migrations[i].Id,
+			)
 		}
 		if dbMig.hash != mig.config.Migrations[i].hash {
 			return mig.runDownTo(dbMig.Id)
@@ -200,7 +212,10 @@ func (mig *Mig) runDownTo(endId int) error {
 		}
 
 		// remove migration from migrations table
-		_, err = mig.config.Db.Exec("DELETE FROM migrations WHERE id = $1", dbMigrations[i].Id)
+		_, err = mig.config.Db.Exec(
+			"DELETE FROM migrations WHERE id = $1",
+			dbMigrations[i].Id,
+		)
 		if err != nil {
 			return fmt.Errorf("error deleting migration from migrations table: %w", err)
 		}
@@ -210,11 +225,28 @@ func (mig *Mig) runDownTo(endId int) error {
 }
 
 func (mig *Mig) getMigrationsFromFS() ([]Migration, error) {
-	result := []Migration{}
+	var (
+		result  []Migration
+		entries []fs.DirEntry
+		err     error
+	)
 
-	entries, err := fs.ReadDir(mig.config.Fs, ".")
-	if err != nil {
-		return nil, err
+	if mig.config.OverrideDirName == "" {
+		entries, err = fs.ReadDir(
+			mig.config.Fs,
+			".",
+		)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		entries, err = fs.ReadDir(
+			mig.config.Fs,
+			mig.config.OverrideDirName,
+		)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	for _, entry := range entries {
@@ -222,21 +254,38 @@ func (mig *Mig) getMigrationsFromFS() ([]Migration, error) {
 			continue
 		}
 
-		m := Migration{}
+		var (
+			m        = Migration{}
+			contents []byte
+			err      error
+		)
+
 		m.FileName = entry.Name()
 		m.Id, err = getIntFromFileName(m.FileName)
 		if err != nil {
 			return nil, err
 		}
 
-		contents, err := fs.ReadFile(mig.config.Fs, entry.Name())
+		if mig.config.OverrideDirName != "" {
+			contents, err = fs.ReadFile(
+				mig.config.Fs,
+				fmt.Sprintf("%s/%s", mig.config.OverrideDirName, m.FileName),
+			)
+		} else {
+			contents, err = fs.ReadFile(mig.config.Fs, m.FileName)
+		}
+
 		if err != nil {
 			return nil, err
 		}
 		m.raw = string(contents)
 		m.hash = hashRaw(m.raw)
 
-		m.Up, m.Down, err = splitRaw(m.raw, mig.config.UpDelimiter, mig.config.DownDelimiter)
+		m.Up, m.Down, err = splitRaw(
+			m.raw,
+			mig.config.UpDelimiter,
+			mig.config.DownDelimiter,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -260,7 +309,14 @@ func (mig *Mig) getMigrationsFromDB() ([]Migration, error) {
 	result := []Migration{}
 	for rows.Next() {
 		m := Migration{}
-		err = rows.Scan(&m.Id, &m.FileName, &m.raw, &m.hash, &m.Up, &m.Down)
+		err = rows.Scan(
+			&m.Id,
+			&m.FileName,
+			&m.raw,
+			&m.hash,
+			&m.Up,
+			&m.Down,
+		)
 		if err != nil {
 			return nil, err
 		}
