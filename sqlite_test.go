@@ -2,12 +2,16 @@ package mig
 
 import (
 	"database/sql"
+	"embed"
 	"os"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 )
+
+//go:embed test/migrations1
+var migrationsFS embed.FS
 
 func TestMigrate(t *testing.T) {
 	t.Run("fresh migrate runs successfully", func(t *testing.T) {
@@ -265,6 +269,44 @@ func TestMigrate(t *testing.T) {
 		m, err := New(Config{
 			Db: db,
 			Fs: os.DirFS("./test/migrations1"),
+		})
+		assert.Nil(t, err)
+
+		err = m.Migrate()
+		assert.Nil(t, err)
+
+		tableMustExistSqlite(t, db, "migrations")
+		tableMustExistSqlite(t, db, "test_table_1")
+		tableMustExistSqlite(t, db, "test_table_2")
+		tableMustExistSqlite(t, db, "test_table_3")
+		tableMustNotExistSqlite(t, db, "test_table_4")
+
+		m.config.Migrations[2].Up = "CREATE TABLE test_table_5 (id INTEGER PRIMARY KEY, name TEXT);"
+		m.config.Migrations[2].Down = "DROP TABLE test_table_5;"
+		err = m.Migrate()
+		assert.Nil(t, err)
+
+		tableMustExistSqlite(t, db, "migrations")
+		tableMustExistSqlite(t, db, "test_table_1")
+		tableMustExistSqlite(t, db, "test_table_2")
+		tableMustNotExistSqlite(t, db, "test_table_3")
+		tableMustNotExistSqlite(t, db, "test_table_4")
+		tableMustExistSqlite(t, db, "test_table_5")
+
+		os.Remove(testDbPath)
+	})
+
+	t.Run("migrating from embedded FS works", func(t *testing.T) {
+		testDbPath := "./test/test8.db"
+		db, err := sql.Open("sqlite3", testDbPath)
+		assert.Nil(t, err)
+		defer db.Close()
+
+		m, err := New(Config{
+			Db: db,
+
+			Fs:              migrationsFS,
+			OverrideDirName: "test/migrations1",
 		})
 		assert.Nil(t, err)
 
